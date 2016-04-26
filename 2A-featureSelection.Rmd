@@ -1,0 +1,256 @@
+---
+title: "CPBS 7630 Module 2 - Feature Selection"
+date: "February 16, 2016"
+output: html_document
+---
+
+---
+
+#### Contents:
+
+* [Getting and cleaning data](#synapse)
+* [Feature selection - filtering methods](#feature_selection1)
+* [Feature selection - wrapper methods](#feature_selection2)
+* [Evaluation](#evaluation)
+
+---
+
+<a name="synapse"/>
+
+### Getting and cleaning data
+
+Get the drug sensitivity data from [Costello, et al. A Community Effort to Assess and Improve Drug Sensitivity Prediction Algorithms (2014)](http://www.nature.com/nbt/journal/v32/n12/full/nbt.2877.html). 
+
+```{r, echo = F, message = F}
+library(synapseClient)
+
+synapseLogin(username = 'rani', password = 'Pr0girl!')
+
+# Log in to Synapse
+#synapseLogin(username = 'myusername', password = 'mypassword')
+```
+
+```{r, message = F}
+
+library(synapseClient)
+
+# --------------------------- EXPRESSION DATA ---------------------------------
+
+# Get gene expression data from the DREAM7 challenge 
+# (36,953 genes, 46 cell lines)
+DREAM7.expression.data <- synGet('syn2785861')
+local.file.path <- DREAM7.expression.data@filePath
+expression.data <- read.delim(local.file.path, 
+                              header = T, 
+                              stringsAsFactors = F,
+                              check.names = F)
+
+# Store gene names for later, remove non-numeric data
+genes <- expression.data$HGNC_ID
+expression.data$Ensembl_ID <- NULL
+expression.data$HGNC_ID <- NULL
+
+# Transform into matrix of samples (cell lines) by features
+expression.data <- t(expression.data)
+colnames(expression.data) <- genes
+
+# Check for NA values
+# sum(is.na(expression.data))
+
+# Log transform
+expression.data <- log2(expression.data+1)
+
+# Get rid of a duplicated gene name
+expression.data <- expression.data[, !duplicated(colnames(expression.data))]
+
+# ----------------------------- RESPONSE DATA ---------------------------------
+
+# Get the drug response data from Synpase, training and test sets
+DREAM7.train <- synGet('syn2785850')
+train.data <- read.table(getFileLocation(DREAM7.train), 
+                         header = T, 
+                         sep='\t', 
+                         row.names = 1,
+                         stringsAsFactors = F)
+
+DREAM7.test <- synGet('syn2785837')
+test.data <- read.table(getFileLocation(DREAM7.test),
+                        header = T,
+                        sep='\t', 
+                        row.names = 1, 
+                        stringsAsFactors = F)
+
+# Concatenate the drug response data for train and test set (53 cell lines, 31 drugs)
+response.data <- rbind(test.data,train.data)
+
+# Pull out data on one drug (Drug 7) to use for regression/classification exercises
+drug7.response <- response.data$Drug7
+names(drug7.response) <- row.names(response.data)
+drug7.response <- na.omit(drug7.response)
+
+# Keep data for the 39 cell lines with both expression and Drug7 response data
+celllines.in.both <- intersect(names(drug7.response), row.names(expression.data))
+drug7.response <- drug7.response[names(drug7.response) %in% celllines.in.both]
+expression.data <- expression.data[row.names(expression.data) %in% celllines.in.both,]
+
+```
+
+<a name="feature_selection1"/>
+
+### Feature selection - filtering methods
+
+Filtering out uninformative features, can often improve the speed and accuracy of a model. For a review of the different kind of feature selection methods, see [Saeyes et al.](http://bioinformatics.oxfordjournals.org/content/23/19/2507.full.pdf+html) and [Bolon-Canedo et al.](http://www.sciencedirect.com/science/article/pii/S0020025514006021) In this section, we will briefly explore two univariate **filter methods** for feature selection, which are independent of the classifier. 
+
+#### Example 1 - filtering by average expression
+
+We can begin by filtering out genes that are not expressed in our cell lines. How could we determine an optimal cutoff for defining "not expressed?"
+
+```{r}
+
+# Summarize average gene expression values - lots of genes with 0 expression
+avg.exps <- colMeans(expression.data)
+summary(avg.exps)
+
+# We can filter out genes that "aren't expressed" - how do we determine this?
+cutoff <- 1
+plot(avg.exps, 
+     main = ' DREAM7 gene expression values', 
+     xlab = 'Gene', ylab = 'Gene expression value',
+     col = ifelse(avg.exps < cutoff, 'red', 'black'))
+expression.data <- expression.data[, avg.exps > cutoff]
+# 14,996 genes have average expression value above the cutoff
+# Are there any other cutoffs you might want to use?
+
+```
+
+#### Example 2 - filtering by variance
+
+The most informative genes might be the ones with the most variability in their expression, so we can filter out genes with a low coefficient of variation.
+
+```{r}
+
+# Keep 5,000 genes with highest coefficient of variation
+CV <- function(vec){
+  return(sd(vec)/mean(vec))
+}
+
+# Order the 14,996 genes by their c.v. (highest to lowest) and keep top 5,000
+all.genes = colnames(expression.data)
+top.cv.genes <- all.genes[order(apply(expression.data, 2, CV), decreasing = T)][1:5000]
+expression.data <- expression.data[, top.cv.genes]
+
+```
+
+Our final feature matrix consists of 39 cell lines and 5,000 genes, which is a very manageable size.
+
+<a name="feature_selection2"/>
+
+### Feature selection - wrapper methods
+
+Unlike filtering methods, wrapper methods for feature selection interact with the classifier. Again, refer to [Saeyes et al.](http://bioinformatics.oxfordjournals.org/content/23/19/2507.full.pdf+html) and [Bolon-Canedo et al.](http://www.sciencedirect.com/science/article/pii/S0020025514006021) for more information. For the example, we will see a wrapper-based method as implemented in the `FSelector` R package. More information on the algorithms in `FSelector` can be found [here](https://en.wikibooks.org/wiki/Data_Mining_Algorithms_In_R/Dimensionality_Reduction/Feature_Selection) or in the package [vignette](https://cran.r-project.org/web/packages/FSelector/FSelector.pdf).
+
+#### Example 1 - forward selection
+
+```{r, eval = F}
+
+# Use 10 random features to demonstrate forward search feature selection
+set.seed(777)
+expression.data.10 <- expression.data[, top.cv.genes[runif(10, 1, 5000)]]
+
+# Combine expression data and response vector
+combined.data <- data.frame(cbind(expression.data.10, Response = drug7.response))
+
+library(FSelector)
+
+# Mean squared error
+MSE <- function(yhat, y){
+    squared.error <- sum(mapply(function(yhat,y) (yhat-y)^2, yhat, y))
+    return(squared.error/length(yhat))
+}
+
+evaluator <- function(subset.to.evaluate) {
+  #k-fold cross validation
+  k <- 5
+  splits <- runif(nrow(combined.data))
+  results = sapply(1:k, function(i) {
+    test.idx <- (splits >= (i - 1) / k) & (splits < i / k)
+    train.idx <- !test.idx
+    test <- combined.data[test.idx,]
+    train <- combined.data[train.idx,]
+    lm.fit <- lm(Response ~ ., train)
+    error = MSE(predict(lm.fit, test, type="response"), test$Response)
+    return(-1*error)
+  })
+  print(subset.to.evaluate)
+  print(mean(results))
+  return(mean(results))
+}
+
+subset.to.use <- forward.search(colnames(combined.data)[-11], evaluator)
+f <- as.simple.formula(subset.to.use, "Response")
+
+
+```
+
+#### Example 2 - recursive feature elimination (backward selection)
+
+In the `caret` package, the `rfe()` function performs recursive feature elimination (RFE). The algorithm can be found [here](http://topepo.github.io/caret/rfe.html). 
+
+```{r, message = F, warning = F}
+library(caret)
+library(randomForest)
+
+# Use 10 random features to demonstrate RFE
+set.seed(888)
+x <- expression.data[, top.cv.genes[runif(10, 1, ncol(expression.data))]]
+y <- drug7.response
+
+# Standard caret preprocessing and scaling
+norm.x <- preProcess(x)
+x <- predict(norm.x, x)
+x <- as.data.frame(x)
+
+# Fit models with varying feature subset sizes
+subsets <- c(1:5, 10, 15, 20)
+
+# Create control object with cross-validation
+ctrl <- rfeControl(functions = lmFuncs,
+                   method = "repeatedcv",
+                   repeats = 5,
+                   verbose = FALSE)
+
+# Fit linear model
+lmProfile <- rfe(x, y,
+                 sizes = subsets,
+                 rfeControl = ctrl)
+
+# View info, including top predictors
+lmProfile
+
+# Get string of variable names that were picked in the final model
+predictors(lmProfile)
+
+# View coefficients
+lmProfile$fit
+
+# Plot
+plot(lmProfile, type = c("g", "o"))
+
+```
+
+#### TODO #1: Implement a wrapper method for feature selection
+
+The examples above use functions in the `FSelector` and `caret` packages to perform feature selection. What are the downsides of these methods? Are they guaranteed to find the optimal combination of features? Why or why not?
+
+Implement your own wrapper method for feature selection (your method should be able to replace the `forward.search()` or `rfe` function in the example above).
+
+<a name="evaluation"/>
+
+### Evaluation
+
+#### TODO #2: Evaluate feature selection methods
+
+Implement a new way of evaluating features in your wrapper method. Plot your results comparing the performance of various subsets of features. 
+
+
+

@@ -1,0 +1,194 @@
+---
+title: "CPBS 7630 Module 5 - Bagging and boosting"
+date: "April 26, 2016"
+output: html_document
+---
+
+---
+
+#### Contents:
+
+* [Boosting](#boosting)
+* [Bagging](#bagging)
+
+---
+
+<a name="boosting"/>
+
+This template requires the [`adabag` package](https://www.jstatsoft.org/index.php/jss/article/view/v054i02/adabag_An_R_Package_for_Classification_with_Boosting_and_Bagging.pdf) for boosting and bagging functions, `curatedOvarianData` for a real-life data set, and `rpart.plot` for pretty plotting regression trees. All packages are available on CRAN.
+
+### Boosting
+
+##### Small, toy data set
+
+Here, we'll use boosting on the `iris` data set to classify examples by the species of iris that they came from. First, we load the data set and make some exploratory plots.
+
+```{r message = F, out.width = '400px', fig.show = 'hold'}
+
+# Load iris data set
+data(iris)
+
+# Plot the 4 variables included in the data set
+#my.layout = layout(cbind(1,2), widths = c(7,3))
+par(mar = c(0,0,0,0))
+plot(iris[,-5], col = c(3:5)[iris$Species], pch = c(15:17)[iris$Species])
+plot.new()
+legend('center', legend = levels(iris$Species), title = 'Iris species',
+       col = 3:5, pch = 19)
+
+```
+
+``` {r eval = F}
+
+# These lines would plot just two of the variables, sepal length and sepal width,
+# and label the examples by their index
+plot(iris[,1:2], col = c(3:5)[iris$Species], pch = 19)
+text(iris[,1:2], labels=1:150)
+```
+
+We can use the `adabag` R package for its `boosting()` and `bagging()` functions. Read the manual pages for each function to understand additional parameters not included in these examples.
+
+```{r message = F, warning = F, fig.align = 'center'}
+
+library(adabag)
+library(rpart.plot)
+
+# Perform boosting on the iris data
+iris.adaboost <- boosting(Species ~ ., data = iris, boos = TRUE, mfinal = 10)
+
+# Pretty plot one of the trees as an example (with rpart.plot package)
+prp(iris.adaboost$trees[[1]])
+```
+
+The `boosting()` function will iterate over the data as many times as we define in the `mfinal` parameter. Each iteration produces one tree. Explore the `iris.adaboost` data object. What information is contained in this structure?
+
+In theory, boosting should give us better performance at each iteration. Was this true? When did the performance max out? One way to address these questions is by visualizing the number of examples that we incorrectly classified at each iteration.
+
+```{r message = F, out.width = '400px', fig.align = 'center'}
+
+# Plot the number of misclassified examples by iteration
+errors = errorevol(iris.adaboost, newdata = iris)$error   # percentage error
+plot(errors*nrow(iris), 
+     main = 'Adaboost error on iris data',
+     xlab = 'Iteration', ylab = 'Number of misclassified examples',
+     pch = 19, type = 'b')
+legend('topright', legend = 'Adaboost error', col = 'black', pch = 19)
+
+```
+
+``````{r message = F, out.width = '400px'}
+# Compare correct/incorrect class assignments at iteration 1, 4, 5 and 10
+true.classes = iris$Species
+for (i in c(1,4,5,10)){
+     class.assignments = boosting(Species~., data = iris, boos = TRUE, mfinal = i)$class
+     correct = class.assignments == true.classes
+     plot.title = paste0('Correctly classified examples at iteration ', i)
+     plot(iris[,1:2], col = c(3:5)[iris$Species], pch = ifelse(correct, 19,1),
+          main = plot.title)
+     legend('topright', legend = c('correct', 'incorrect'), pch = c(19,1), col = 'darkgray')
+}
+
+```
+
+##### TCGA ovarian cancer data set
+
+As we have seen repeatedly in this course, biological data is rarely 2-dimensional. We'll use the TCGA ovarian cancer data set contained in the `curatedOvarianData` package to try out boosting on a larger feature set. The data is contained in an `eset`, short for Expression Set. You can read more about this type of object [here](https://bioconductor.org/packages/3.3/bioc/vignettes/Biobase/inst/doc/ExpressionSetIntroduction.pdf), or just explore the object within R.
+
+```{r message = F, out.width = '400px', warning = F, fig.align = 'center'}
+
+# Get the TCGA ovarian cancer data
+library(curatedOvarianData)
+data(TCGA_eset)
+
+# Get the clinical data
+clin.data = TCGA_eset@phenoData@data
+clin.data = na.omit(clin.data[,c('unique_patient_ID', 'summarygrade')])
+high.grade.samples = row.names(clin.data[clin.data$summarygrade == 'high',])
+
+# Reformat the expression data (feature matrix)
+tcga.expr = data.frame(t(exprs(TCGA_eset)))
+all.samples = intersect(row.names(tcga.expr), row.names(clin.data))
+tcga.expr = tcga.expr[all.samples,]
+clin.data = clin.data[all.samples,]
+
+# Add the response vector (high-grade, low-grade) to the feature matrix
+tcga.expr$Grade = as.factor(ifelse(row.names(tcga.expr) %in% high.grade.samples, 'high', 'low'))
+
+# OPTIONAL: Use lasso for quick feature selection
+# (I'm doing this to get a very reduced set of features very quickly)
+library(glmnet)
+lasso.fit = cv.glmnet(x = as.matrix(tcga.expr[,-ncol(tcga.expr)]),
+                      y = tcga.expr$Grade,
+                      family = 'binomial',
+                      alpha = 1)
+  
+# Get the features with non-zero coefficients
+coeffs = coef(lasso.fit, s='lambda.min', exact=TRUE)
+idx = which(coeffs !=0)
+good.features = row.names(coeffs)[idx[2:length(idx)]]
+
+# Perform boosting on the data to classify tumors as 'high-grade' or not
+tcga.adaboost = boosting(Grade ~ ., data = tcga.expr[,c(good.features, 'Grade')], 
+                         boos = T, mfinal = 12)
+
+# Again, plot error by iteration
+errors = errorevol(tcga.adaboost, newdata = tcga.expr)$error
+plot(errors*nrow(tcga.expr), 
+     main = 'Adaboost error on TCGA ovarian cancer data',
+     xlab = 'Iteration', ylab = 'Number of misclassified examples',
+     pch = 19, type = 'b')
+legend('topright', legend = 'Adaboost error', col = 'black', pch = 19)
+```
+
+``````{r message = F, out.width = '400px'}
+
+# As above, visualize correct/incorrect examples at different iterations
+true.classes = as.character(tcga.expr$Grade)
+for (i in c(1,4,7,11)){
+     class.assignments = boosting(Grade ~ ., data = tcga.expr[,c(good.features, 'Grade')], 
+                                  boos = T, mfinal = i)$class
+     correct = class.assignments == true.classes
+     plot.title = paste0('Correctly classified examples at iteration ', i)
+     plot(tcga.expr[,good.features[3:4]], 
+          col = ifelse(tcga.expr$Grade == 'high', 'red', 'blue'),
+          pch = ifelse(correct, 19,1),
+          main = plot.title)
+     legend('topright', legend = c('correct', 'incorrect'), pch = c(19,1), col = 'darkgray')
+}
+
+# Visualize one of the trees to see the decision stumps
+prp(tcga.adaboost$trees[[1]])
+
+```
+
+---
+
+<a name="bagging"/>
+
+### Bagging
+
+##### TCGA ovarian cancer data set
+
+Bagging can be performed in a very similar manner:
+
+```{r message = F, out.width = '400px', fig.align = 'center'}
+
+# Bagging TCGA ovarian cancer data
+tcga.bagging = bagging(Grade ~ ., data = tcga.expr[,c(good.features, 'Grade')], 
+                       boos = T, mfinal = 12)
+
+# Plot number of misclassified examples by iteration
+errors = errorevol(tcga.bagging, newdata = tcga.expr)$error
+plot(errors*nrow(tcga.expr), 
+     main = 'Bagging error on TCGA ovarian cancer data',
+     xlab = 'Iteration', ylab = 'Number of misclassified examples',
+     pch = 19, type = 'b')
+legend('topright', legend = 'Bagging error', col = 'black', pch = 19)
+
+```
+
+### TODO
+
+Implement the bagging algorithm and apply it to your own data set. You may use the `rpart()` function. *Show and summarize* how the performance acheived by the ensemble compare to the performance of a single classifier.
+
+References: [Adabag paper](https://www.jstatsoft.org/index.php/jss/article/view/v054i02/adabag_An_R_Package_for_Classification_with_Boosting_and_Bagging.pdf), which provides an overview of boosting and bagging algorithms.

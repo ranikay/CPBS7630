@@ -1,0 +1,283 @@
+---
+title: "CPBS 7630 Module 3 - Linear Models"
+date: "March 8, 2016"
+output: html_document
+---
+
+---
+
+#### Contents:
+
+* [Get cleaned data](#synapse)
+* [Elastic net](#glmnet)
+* [Evaluation](#evaluation)
+
+---
+
+<a name="synapse"/>
+
+### Get the cleaned data from Synapse
+
+For the following examples, we are going to use data from the [Genomics of Drug Sensitivity in Cancer](http://www.cancerrxgene.org/) (GDSC) database. Specifically, we'll use gene expression data (microarray) from 621 cell lines to predict their drug response, which the GDSC measured by [IC50](https://en.wikipedia.org/wiki/IC50) value.
+
+```{r, echo = F, message = F, eval = F}
+library(synapseClient)
+
+synapseLogin(username = 'rani', password = 'Pr0girl!')
+
+# Log in to Synapse
+#synapseLogin(username = 'myusername', password = 'mypassword')
+```
+
+```{r, message = F, eval = F}
+
+# ------------------------------- GET DATA -------------------------------------
+# Get GDSC IC50 data from Synapse - IC50 values for 621 cell lines and 2 example drugs
+GDSC.data = synGet('syn5713113')
+local.file.path = GDSC.data@filePath
+
+# Load the .rds file
+GDSC.data = readRDS(local.file.path)
+rm(local.file.path)
+
+# GDSC.data is a data frame with columns for:  
+#############################
+# Cell.line
+# Cancer.Type
+# Tissue
+# Etoposide_IC_50 - IC50 values for Etoposide
+# Vinorelbine_IC_50 - IC50 values for Vinorelbine
+# Columns for 13,194 genes - expression measured by microarray
+#############################
+# Can see this structure with str(GDSC.data[,1:10]) for example
+
+# ------------------------------- FEATURE SELECTION ---------------------------
+
+# Remove any all-zero genes (13,198 genes remaining)
+GDSC.data = GDSC.data[, colSums(GDSC.data[,6:ncol(GDSC.data)]) > 0]
+
+# Keep only one measurement per cell line for these examples
+GDSC.data = GDSC.data[!duplicated(GDSC.data$Cell.line),]
+
+```
+
+---
+
+<a name="glmnet"/>
+
+### Linear Models
+
+Note: Make sure you install the `glmnet` package in R. We will use this for all examples of Ridge, Lasso and elastic net regression.
+
+```{r, message = F, warning = F, eval = F}
+
+######## Organize the data for fitting linear models:
+
+# Pull out the numeric expression data
+expression.data = GDSC.data[,6:ncol(GDSC.data)]
+row.names(expression.data) = GDSC.data$Cell.line
+
+# Pick one of the drugs to use as response
+response = GDSC.data$Etoposide_IC_50
+
+# Define cutoffs (biological value or based on plot) for sensitive/resistant
+sensitive.cutoff = -1    
+resistant.cutoff = 5
+
+# Append response variable to matrix 
+expression.data$Response = ifelse(response >= resistant.cutoff, 'resistant',
+                          ifelse(response <= sensitive.cutoff, 'sensitive', 'inbetween'))
+
+# Save group sizes for comparison
+tab = table(expression.data$Response)
+
+# Check plot to make sure our cutoffs look reasonable
+group.colors = ifelse(expression.data$Response == 'resistant', 'blue',
+                      ifelse(expression.data$Response == 'sensitive', 'red', 'black'))
+
+# Can plot different symbols for different cancers, use this as the pch arg to plot()
+#group.symbols = as.numeric(as.factor(unique(GDSC.data$Cancer.Type)))
+
+plot(response, col = group.colors, pch = 16,
+     main = 'IC50 values by cell line in GDSC', 
+     xlab = 'Cell line',
+     ylab = 'Log concentration', ylim = c(-4.5, 15))
+legend('topright', pch = 16, col = c('red', 'blue', 'black'),
+       legend = c(paste0(sprintf('Sensitive (n = %d)', tab['sensitive'])), 
+                  paste0(sprintf('Resistant (n = %d)', tab['resistant'])), 
+                  paste0(sprintf('In Between (n = %d)', tab['inbetween']))))
+
+# Filter out the inbetweens and make the two responses a factor
+expression.data = expression.data[expression.data$Response != 'inbetween',]
+expression.data$Response = factor(expression.data$Response)
+table(expression.data$Response)
+
+# Define train and test sets
+cell.lines = row.names(expression.data)
+train.percent = .75
+inTrain = cell.lines %in% sample(cell.lines, floor(train.percent*length(cell.lines)))
+train.data = expression.data[inTrain,]
+test.data = expression.data[!inTrain,]
+
+# Make sure we have enough of each group in test set
+table(test.data$Response)
+
+```
+
+---
+
+#### Example 1 - Ridge regression
+
+```{r message = F, warning = F, eval = F}
+
+library(glmnet)
+
+# Make feature matrix and response vector
+feature.matrix = as.matrix(train.data[,-ncol(train.data)])  # Exclude the last column (Response)
+response.vector = train.data$Response
+
+# Fit linear Ridge regression model
+ridge.fit = glmnet(x = feature.matrix,      # features = all genes
+                   y = response.vector,     # binary Etoposide response
+                   family = 'binomial',     # we are doing binary classification
+                   alpha = 0)               # alpha = 0 is the Ridge penalty
+
+# Use the fit model to predict on the testing data
+testing.matrix= as.matrix(test.data[,-ncol(test.data)])     # Exclude the last column (Response)
+ridge.preds = predict(ridge.fit, newx = testing.matrix, type = 'class')
+
+# Take a look at how our model did
+table(Predicted_Group = ridge.preds[,ncol(ridge.preds)], 
+      Actual_Group = test.data$Response)
+
+ReportPerfMetrics = function(predicted.labels, true.labels, pos.class){
+  # Calculate the accuracy, precision and recall for two-class prediction
+  tp = sum(true.labels == pos.class & predicted.labels == pos.class)
+  fp = sum(true.labels != pos.class & predicted.labels == pos.class)
+  tn = sum(true.labels != pos.class & predicted.labels != pos.class)
+  fn = sum(true.labels == pos.class & predicted.labels != pos.class)
+  n = tp + fp + tn + fn
+  
+  accuracy = (tp + tn)/n
+  precision = tp/(tp + fp)
+  recall = tp/(tp + fn)
+  
+  return(list(Accuracy = accuracy, Precision = precision, Recall = recall))
+}
+
+ridge.metrics = ReportPerfMetrics(ridge.preds[,ncol(ridge.preds)], test.data$Response, 'sensitive')
+
+```
+
+---
+
+#### Example 2 - Lasso regression
+
+```{r, message = F, warning = F, eval = F}
+
+# Fit linear Lasso regression model
+lasso.fit = glmnet(x = feature.matrix,      # features = all genes
+                   y = response.vector,     # binary Etoposide response
+                   family = 'binomial',     # we are doing binary classification
+                   alpha = 1)               # alpha = 1 is the Lasso penalty
+
+# Use the fit model to predict on the testing data
+lasso.preds = predict(lasso.fit, newx = testing.matrix, type = 'class')
+
+# Take a look at how our model did
+lasso.metrics = ReportPerfMetrics(lasso.preds[,ncol(lasso.preds)], test.data$Response, 'sensitive')
+table(Predicted_Group = lasso.preds[,ncol(lasso.preds)], 
+      Actual_Group = test.data$Response)
+
+```
+
+---
+
+#### Example 3 - Elastic net regression with cross-validation
+
+```{r, message = F, warning = F, eval = F}
+
+# Fit elastic net model
+elastic.fit = cv.glmnet(x = feature.matrix,      # features = all genes
+                   y = response.vector,          # binary Etoposide response
+                   family = 'binomial',          # we are doing binary classification
+                   nfolds = 5,
+                   type.measure = 'auc',
+                   alpha = 0.5)
+
+# Use the fit model to predict on the testing data
+elastic.preds = predict(elastic.fit, newx = testing.matrix, type = 'class')
+
+# Take a look at how our model did
+elastic.metrics = ReportPerfMetrics(elastic.preds[,ncol(elastic.preds)], test.data$Response, 'sensitive')
+table(Predicted_Group = elastic.preds[,ncol(elastic.preds)], 
+      Actual_Group = test.data$Response)
+
+# Plot the cross-validation curve, and upper and lower standard deviation curves, as a function of the lambda values used
+plot(elastic.fit)
+
+```
+  
+---
+
+<a name="evaluation"/>
+
+### Evaluation
+
+For discussion on the alpha and lambda parameters, check out this [review of `glmnet` and elastic net regression](http://www.moseslab.csb.utoronto.ca/alan/glmnet_presentation.pdf).
+
+```{r warning = F, message = F, eval = F}
+
+# Compare the 3 examples, alpha = 0, alpha = 1, and alpha = 0.5
+results = cbind(Ridge = ridge.metrics, Lasso = lasso.metrics, ElasticNet = elastic.metrics)
+results
+
+######### Find optimal alpha and lambda with caret cross-validation
+library(caret)
+
+# Construct object for holding training parameters
+my.train.control = trainControl(method = "repeatedCV", 
+                                number = 10, repeats = 5, 
+                                returnResamp = "all", 
+                                classProbs = TRUE, 
+                                summaryFunction = twoClassSummary)
+
+# Train an elastic net model with varying alpha and lambda
+model = train(Response ~ ., data = train.data, 
+               method = "glmnet",         # Fit an elastic net model
+               metric = "ROC",            # Use AUC as the loss for cross validation
+               tuneGrid = expand.grid(.alpha = seq(0, .5, by = .05),     # Try these alpha values
+                                      .lambda = seq(0, 1, by = .05)),    # And these lambda values
+               trControl = my.train.control)
+model
+
+# Reshape the data into a matrix for making a heatmap
+library(gplots)      # ::heatmap.2()
+library(reshape2)    # ::dcast()
+model.results = model$results
+model.cast = dcast(model.results, alpha ~ lambda, value.var = 'ROC')
+row.names(model.cast) = model.cast$alpha
+model.cast$alpha = NULL
+
+# Make a heatmap of the alphas and lambdas
+my.palette <- colorRampPalette(c("blue", "red"))(n = 100)
+heatmap.2(as.matrix(model.cast), 
+          col = my.palette,           # Define heatmap colors
+          Rowv = F, Colv = F,         # Don't cluster/reorder rows or columns
+          dendrogram = 'none',        # Don't plot dendrogram
+          trace = 'none',             # Don't draw trace lines
+          density.info = 'none',      # Don't draw histogram on color key
+          key.xlab = 'ROC',           # Label the color key
+          main = 'Optimizing alpha and lambda values',
+          xlab = 'Lambda values',
+          ylab = 'Alpha values')             
+
+```
+
+---
+
+#### TODO
+
+Apply Ridge, Lasso, and elastic net regression to your data set. Discuss your procedure and results.
+
+Explore feature selection method(s)

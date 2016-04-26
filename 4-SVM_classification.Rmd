@@ -1,0 +1,192 @@
+---
+title: "CPBS 7630 Module 4 - SVM Classification"
+date: "April 4, 2016"
+output: html_document
+---
+
+---
+
+#### Contents:
+
+* [Example 1 - Linear SVM](#linear)
+* [Example 2 - RBF SVM](#nonlinear)
+* [Example 3 - Feature spaces](#space)
+
+This tutorial requires the `mlbench` package for toy data and the `kernlab` package for kernels and SVMs.
+
+---
+
+<a name="linear"/>
+
+### Example 1 - Linear SVM
+
+In this first example, we will build a linear SVM and apply it to some simple two-dimensional toy data to understand the basic concepts of support vectors and SVM classification. 
+
+##### Generate toy data
+
+```{r}
+
+##### Make toy data from two Gaussian distributions 
+
+# CONSTANTS
+kExamples = 150               # number of points (aka examples)
+kTrainPercent = .80           # percentage of data to be used for training
+
+# Use mlbench library for making fun distributions
+# RECOMMENDED: read the man page for mlbench.2dnormals()
+library(mlbench)
+
+# Make toy data from two Gaussian distributions
+gauss.data = mlbench.2dnormals(kExamples, cl = 2, r = 2)
+
+# Separate the matrix of examples (x) and vector of labels (y)
+x = gauss.data$x
+y = gauss.data$classes
+
+# Visualize the data
+plot(x, 
+     main = 'SVM toy data - two Gaussians',
+     pch = ifelse(y == 1, 2, 1))
+
+legend('topleft', 
+       c('Class 1 examples', 'Class 2 examples'),
+       pch = c(2, 1))
+
+```
+
+
+##### Train and test a linear SVM
+
+```{r message = F, warning = F}
+
+##### Make training and test sets for linear SVM classification
+  
+# Define training and test sets
+train.idx = sample(kExamples, kExamples * kTrainPercent)
+x.train = x[train.idx,]
+x.test = x[-train.idx,]
+y.train = y[train.idx]
+y.test = y[-train.idx]
+
+# Use the kernlab package for SVM
+# RECOMMENDED: Read the man page for ksvm()
+library(kernlab)
+
+##### Train a linear SVM
+linear.SVM = ksvm(x = x.train,
+                  y = y.train, 
+                  type = 'C-svc',              # C classification
+                  kernel = 'vanilladot',       # linear kernel
+                  C = 100,
+                  kpar = list(degree = 3))                     # regularization term
+
+# View a general summary of the SVM we trained
+linear.SVM
+table(Predicted = predict(linear.SVM, x.test), Actual = y.test)
+
+# NOTE: View all of the attributes that you can access with `attributes(my.SVM)`
+# Some examples:
+# alpha(my.SVM))                               # support vectors, alpha vector
+# alphaindex(my.SVM))                          # index of support vectors in matrix
+# b(my.SVM)                                    # intercept
+
+# Plot the classifier and highlight the support vectors
+plot(linear.SVM, data = x.train)
+
+```
+
+---
+
+<a name="nonlinear"/>
+
+### Example 2 - Non-linear SVM
+
+The following example is not linearly separable in two dimensions. We show how the kernel trick helps us make the data linearly separable in a transformed feature space.
+
+##### Generate toy data
+
+```{r}
+
+##### Make toy data that looks like a donut
+
+# Get new data points from mlbench library
+circle.data = mlbench.circle(kExamples)
+
+# Separate the matrices of examples (x) and labels (y)
+x = circle.data$x
+y = circle.data$classes
+
+# Visualize
+plot(x, 
+     main = 'SVM toy data - donut shaped',
+     pch = ifelse(y == 1, 1, 2))
+
+legend('topleft', 
+       c('Class 1 examples', 'Class 2 examples'),
+       pch = c(1, 2))
+
+```
+
+##### Train and test a non-linear SVM
+
+```{r message = F}
+
+##### Make training and test sets for SVM classification
+  
+# Define training and test sets
+train.idx = sample(kExamples, kExamples * kTrainPercent)
+x.train = x[train.idx,]
+x.test = x[-train.idx,]
+y.train = y[train.idx]
+y.test = y[-train.idx]
+
+##### Train a radial basis function (RBF) SVM
+rbf.SVM = ksvm(x = x.train,
+               y = y.train, 
+               type = 'C-svc',                 # C classification
+               kernel = 'rbfdot',              # radial basis kernel (Gaussian)
+               C = 10)                         # regularization term
+
+# View a general summary of the SVM we trained
+rbf.SVM
+table(Predicted = predict(rbf.SVM, x.test), Actual = y.test)
+
+# Plot the classifier and highlight the support vectors
+plot(rbf.SVM, data = x.train)
+
+```
+
+---
+
+<a name="space"/>
+
+### Example 3
+
+##### Understanding the transformed feature space
+
+```{r}
+# Visualize
+plot(x, 
+     main = 'Donut data in original feature space',
+     xlab = 'x_1',
+     ylab = 'x_2',
+     pch = ifelse(y == 1, 1, 2))
+
+legend('topleft', 
+       c('Class 1 examples', 'Class 2 examples'),
+       pch = c(1, 2))
+
+plot(x^2, 
+     main = 'Donut data in quadratic space',
+     xlab = '(x_1)^2',
+     ylab = '(x_2)^2',
+     pch = ifelse(y == 1, 1, 2))
+
+legend('topright', 
+       c('Class 1 examples', 'Class 2 examples'),
+       pch = c(1, 2))
+
+abline(a = .63, b = -1, col = 'red')
+
+
+``` 

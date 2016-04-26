@@ -1,0 +1,196 @@
+---
+title: "CPBS 7630 Module 2B - Dimensionality Reduction"
+date: "February 18, 2016"
+output: html_document
+---
+
+---
+
+#### Contents:
+
+* [Get cleaned data](#synapse)
+* [Principal components analysis](#pca)
+* [Evaluation](#evaluation)
+
+---
+
+<a name="synapse"/>
+
+### Get the cleaned data from Synapse
+
+Get the drug sensitivity data from [Costello, et al. A Community Effort to Assess and Improve Drug Sensitivity Prediction Algorithms (2014)](http://www.nature.com/nbt/journal/v32/n12/full/nbt.2877.html). 
+
+```{r, echo = F, message = F}
+library(synapseClient)
+
+synapseLogin(username = 'rani', password = 'Pr0girl!')
+
+# Log in to Synapse
+#synapseLogin(username = 'myusername', password = 'mypassword')
+```
+
+```{r, message = F}
+
+# ------------------------------- GET DATA -------------------------------------
+# Get cleaned, log-transformed gene expression and response data from Synapse
+DREAM7.data <- synGet('syn5663580')
+local.file.path <- DREAM7.data@filePath
+
+# Load the RData file
+load(local.file.path)
+rm(local.file.path, DREAM7.data)
+
+# Enviroment now includes:
+#############################
+# expression.data - matrix of gene expression values for 30,154 genes in 39 cell lines
+# drug7.response - response vector for Drug 7
+# genes - vector of original gene names
+# cell.lines - vector of 39 cell lines with both expression and response data
+# all.response - response matrix for all drugs
+#############################
+
+# ------------------------------- FEATURE SELECTION ---------------------------
+
+# For scaling for PCA later, we can't have any all-zero genes
+expression.data <- data.frame(expression.data)
+expression.data <- expression.data[, colSums(expression.data) > 0]
+
+```
+
+<a name="pca"/>
+
+### Principal components analysis
+
+Principal components analysis (PCA) is used for performing dimensionality reduction (feature extraction) to find novel, meaningful patterns in a data set.
+
+#### Example 1 - toy data
+
+To illustrate the basic principles of PCA, we will first look at a toy data set and an example adapted from [here](https://tgmstat.wordpress.com/2013/11/28/computing-and-visualizing-pca-in-r/#ref1). The `iris` data set contains data on 3 species of iris and measurements for their sepal length, sepal width, petal length and petal width.
+
+```{r, message = F, warning = F}
+
+# Toy data set
+data(iris)
+
+# Log transform 
+iris.log <- log(iris[, 1:4])
+iris.species <- iris[, 5]
+ 
+# Apply PCA with stats::prcomp
+iris.pca <- prcomp(iris.log,
+                 center = TRUE,
+                 scale. = TRUE)
+# View the principal components rotation (also called loadings)
+iris.pca
+
+# Get ggbiplot from Github if needed
+# library(devtools)
+# install_github("vqv/ggbiplot")
+
+# Plot principal component variance
+plot(iris.pca, type = "l", col = 'skyblue', pch = 19, 
+     main = 'PC variance for iris data')
+
+# Plot PCA with ggbiplot 
+library(ggbiplot)
+g <- ggbiplot(iris.pca, obs.scale = 1, var.scale = 1, 
+              groups = iris.species, ellipse = TRUE, 
+              circle = TRUE)
+g <- g + scale_color_discrete(name = '')
+g <- g + theme(legend.direction = 'horizontal', 
+               legend.position = 'top')
+print(g)
+
+# Summarize each of the principal components
+summary(iris.pca)
+
+```
+
+#### Example 2 - PCA for drug synergy
+
+In this example, we'll use the DREAM7 drug synergy data we prepared in the first code chunk.
+
+```{r, message = F, warning = F}
+
+# Apply PCA with stats::prcomp
+expression.pca <- prcomp(expression.data,
+                 center = TRUE,
+                 scale. = TRUE)
+
+# View the number of principal components
+length(expression.pca$sdev)
+
+# Plot principal component variance
+plot(expression.pca, type = "l", col = 'skyblue', pch = 19, 
+     main = 'PC variance for iris data')
+
+# Get ggbiplot from Github if needed
+# library(devtools)
+# install_github("vqv/ggbiplot")
+
+# Categorize drug response for coloring the plot
+# Less than median GI50 = sensitive; greater than median = resistant
+response.groups <- factor(drug7.response >= median(drug7.response), labels = c('sensitive', 'resistant'))
+
+# Plot PCA with ggbiplot 
+library(ggbiplot)
+g <- ggbiplot(expression.pca, obs.scale = 1, var.scale = 1, 
+              groups = response.groups, ellipse = TRUE, 
+              var.axes = F, circle = TRUE)
+g <- g + scale_color_discrete(name = '')
+g <- g + theme(legend.direction = 'horizontal', 
+               legend.position = 'top')
+print(g)
+
+# We could also try separating the groups more based on response distribution
+hist(drug7.response, xlab = 'GI50')
+
+response.groups <- factor(cut(drug7.response, 
+                       breaks = c(0, 4.2, 6.7, 7.1),
+                       labels = c('sensitive', 'average', 'resistant')))
+
+g <- ggbiplot(expression.pca, obs.scale = 1, var.scale = 1, 
+              groups = response.groups, ellipse = TRUE, 
+              var.axes = F, circle = TRUE)
+g <- g + scale_color_discrete(name = '')
+g <- g + theme(legend.direction = 'horizontal', 
+               legend.position = 'top')
+print(g)
+
+# Summarize each of the 39 principal components
+summary(expression.pca)
+```
+  
+<a name="evaluation"/>
+
+### Comparison with/without PCA
+
+```{r warning = F}
+
+# Mean squared error
+MSE <- function(yhat, y){
+    squared.error <- sum(mapply(function(yhat,y) (yhat-y)^2, yhat, y))
+    return(squared.error/length(yhat))
+}
+
+# Make train and test sets
+train = cell.lines %in% sample(cell.lines, 20)
+test = !train
+
+# Feature matrix made from 29 random genes
+old.feature.matrix <- expression.data[,sample(29)]
+old.combined <- cbind(old.feature.matrix, Response = drug7.response)
+old.lm <- lm(Response ~ ., old.combined[train,])
+MSE(predict(old.lm, old.combined[test,], type="response"), old.combined[test, 'Response'])
+
+# New feature matrix made from 29 PCs
+new.feature.matrix <- data.frame(expression.pca$x[,1:29])
+new.combined <- cbind(new.feature.matrix, Response = drug7.response)
+new.lm <- lm(Response ~ ., new.combined[train,])
+MSE(predict(new.lm, new.combined[test,], type="response"), new.combined[test, 'Response'])
+
+```
+
+#### TODO
+
+Apply PCA to your new data set for the presentation on Thursday. How many principal components are required to explain 90% of the variance? Evaluate the effect of performing PCA on your results. Can you relate/correlate any of the principal components with the underlying biology (or other applicable data type)?
