@@ -1,0 +1,15 @@
+---
+title: "CPBS 7630 Module 1 Assignment - Code Report"
+date: "Due: February 25, 2016"
+output: html_document
+---
+
+---
+
+### Report Outline
+
+Edit the Module 1 code template to include the following:
+
+1. In the feature selection section, summarize and compare the top genes selected when we filter by variance compared to when we filter by the coefficient of variation.
+
+2. In the data imputation section, impute missing data with 2 other algorithms. Add the performance of your 2 chosen algorithms to the existing plot. Interpret the results of the plot.

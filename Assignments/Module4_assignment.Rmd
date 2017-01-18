@@ -1,0 +1,21 @@
+---
+title: "CPBS 7630 Module 4 Assignment - Markdown Report"
+date: "Due: April 14, 2016"
+output: html_document
+---
+
+---
+
+### Report Outline
+
+1. Provide brief background on your data set, which can be the same or different than the one you used in Module 2. Explain your hypothesis / research question and how you plan to address it.
+
+2. Perform one or more feature selection / dimensionality reduction methods that are appropriate for your data. Justify your choices.
+  
+3. Fit an appropriate Ridge regression model and a Lasso regression model.
+
+4. Use cross-validation to learn the optimal lambda value in an elastic net regression model for different values of alpha.
+
+5. Evaluate the performance of each model with appropriate metrics and visualizations.
+
+Report your code and interpret your results in a .Rmd or PDF, which you will present in class March 17th.

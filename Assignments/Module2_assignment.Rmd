@@ -1,0 +1,25 @@
+---
+title: "CPBS 7630 Module 2 Assignment - Class Presentation"
+date: "Due: February 25, 2016"
+output: html_document
+---
+
+---
+
+### Presentation Outline
+
+1. Find a data set of interest, i.e. data from DREAM, TCGA, GEO, etc.
+
+2. Perform 3 feature selection / dimensionality reduction methods.
+
+    a. Perform a filtering and wrapper method for feature selection to get Feature Matrix 1 and 2.
+  
+    b. Perform a dimensionality reduction method to get Feature Matrix 3.
+  
+    c. Implement your own `information.gain()` function and demonstrate that it produces the correct results on a small, toy data set.
+  
+3. Select an appropriate model and fit to each of the 3 feature matrices from Step 2.
+
+4. Evaluate the performance of each of the feature set with appropriate metrics and visualizations.
+
+Report your code and interpret your results in a .Rmd or PDF, which you will present in class 25 Feb 2016.

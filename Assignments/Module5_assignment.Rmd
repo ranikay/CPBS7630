@@ -1,0 +1,19 @@
+---
+title: "CPBS 7630 Module 5 Assignment - Markdown Report & Presentation"
+date: "Due: May 5th, 2016"
+output: html_document
+---
+
+---
+
+### Report Outline
+
+1. Provide brief background on your data set, which can be the same or different than the one you've used in this class already. Explain your hypothesis / research question and how you plan to address it.
+
+2. Perform one or more feature selection / dimensionality reduction methods that are appropriate for your data. Justify your choices.
+  
+3. Implement the bagging algorithm - Use the `rpart()` function to do recursive partitioning and your own code to return the predictions of the final classifier. 
+
+4. As in the code template, plot the error across multiple iterations. Compare the overall performance of bagging on your data set to the performance of a single classifier (either one of the decision trees you generate, or another classifier we've learned about). Choose appropriate metrics and visualizations to illustrate the comparison. Summarize your results in a sentence or two.
+
+Report your code and interpret your results in a .Rmd or PDF, which you will present in class May 5th.
