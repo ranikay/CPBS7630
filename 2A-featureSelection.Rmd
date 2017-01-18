@@ -24,8 +24,6 @@ Get the drug sensitivity data from [Costello, et al. A Community Effort to Asses
 ```{r, echo = F, message = F}
 library(synapseClient)
 
-synapseLogin(username = 'rani', password = 'Pr0girl!')
-
 # Log in to Synapse
 #synapseLogin(username = 'myusername', password = 'mypassword')
 ```

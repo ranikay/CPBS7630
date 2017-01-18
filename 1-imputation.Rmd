@@ -26,8 +26,6 @@ For this course, we will be using drug sensitivity data from [Costello, et al. A
 ```{r, echo = F, message = F}
 library(synapseClient)
 
-synapseLogin(username = 'rani', password = 'Pr0girl!')
-
 # Log in to Synapse
 #synapseLogin(username = 'myusername', password = 'mypassword')
 ```
